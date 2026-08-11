@@ -17,7 +17,7 @@ describe('Task API endpoints', () => {
   description: 'Créée via l’API',
   statut: 'à faire'
   });
-expect(res.statusCode).toBe(201);
+  expect(res.statusCode).toBe(201);
   expect(res.body).toHaveProperty('id');
   expect(res.body.nom).toBe('Tâche API');
   taskId = res.body.id;
@@ -34,7 +34,8 @@ expect(res.statusCode).toBe(201);
   expect(res.body.id).toBe(taskId);
   });
   test('PUT /api/tasks/:id - modifie une tâche', async () => {
-  const res = await request(app.put(`/api/tasks/${taskId}`)
+  const res = await request(app)
+  .put(`/api/tasks/${taskId}`)
   .send({ nom: 'Tâche modifiée', statut: 'terminée' });
   expect(res.statusCode).toBe(200);
   expect(res.body.nom).toBe('Tâche modifiée');
@@ -49,4 +50,3 @@ expect(res.statusCode).toBe(201);
   expect(res.statusCode).toBe(404);
   });
 });
-

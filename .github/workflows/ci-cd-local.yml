@@ -7,124 +7,253 @@ on:
   pull_request:
     branches:
       - main
+
 env:
-    DB_HOST: mysql
-    DB_USER: root
-    DB_PASSWORD: root
-    DB_NAME: todolist_db
-    DB_DIALECT: mysql
-    PORT: 3000
-    NODE_ENV: test
+  DB_HOST: 127.0.0.1
+  DB_USER: root
+  DB_PASSWORD: root
+  DB_NAME: todolist_db
+  DB_DIALECT: mysql
+  PORT: 3000
+  NODE_ENV: test
+
 jobs:
-    test:
-        name: "Tests (Jest: unit + integration)"
-        runs-on: ubuntu-latest
 
-        services:
-            mysql:
-                image: mysql:5.7
-                env:
-                    MYSQL_ROOT_PASSWORD: root
-                    MYSQL_DATABASE: todolist_db
-                ports:
-                    - 3306:3306
-                options: >-
-                    --health-cmd="mysqladmin ping -h mysql -u root -p root"
-                    --health-interval=5s
-                    --health-timeout=5s
-                    --health-retries=20
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+  # ============================================================
+  # 1. TESTS
+  # ============================================================
+  test:
+    name: "Tests (Jest: unit + integration)"
+    runs-on: ubuntu-latest
 
-            - name: Set up Node18 + npm cache
-              uses: actions/setup-node@v4
-              with:
-                  node-version: '18'
-                  cache: 'npm'
-                  cache-dependency-path: package-lock.json
-            - name: Install dependencies
-              run: npm ci
-            - name: Wait for MySQL to be ready
-              run: |
-                  echo "Waiting for MySQL to be ready..."
-                  for i in {1..30}; do
-                      if mysqladmin ping -h mysql -u root -proot --silent; then
-                          echo "MySQL is ready!"
-                          exit 0
-                      fi
-                      echo "Waiting for MySQL... ($i/30)"
-                      sleep 2
-                  done
-                  echo "MySQL did not become ready in time."
-                  exit 1
-            - name: Run tests
-              run: npm test
-    build:
-        name: "Build Docker Image"
-        runs-on: ubuntu-latest
-        needs: test
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: todolist_db
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+    steps:
 
-            - name: Build image
-              run: docker build -t projet-fil-rouge:ci .
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    deploy_local:
-        name: "Local deploy (runner) + smoke test"
-        runs-on: ubuntu-latest
-        needs: build
+      - name: Set up Node.js 18 + npm cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+      - name: Install dependencies
+        run: npm ci
 
-            - name: Run MySQL container
-              run: |
-                  docker run -d --name todolist-mysql \
-                  -e MYSQL_ROOT_PASSWORD=root \
-                  -e MYSQL_DATABASE=todolist_db \
-                  -p 3306:3306 \
-                  --health-cmd="mysqladmin ping -h mysql -u root -p root" \
-                  --health-interval=5s \
-                  --health-timeout=5s \
-                  --health-retries=20 \
-                  mysql:5.7
-            - name: Wait for MySQL health check
-              run: |
-                  echo "Waiting for MySQL to be ready..."
-                  for i in {1..30}; do
-                      status=$(docker inspect --format='{{.State.Health.Status}}' todolist-mysql 2> /dev/null || echo "starting")
-                      echo "MySQL health status: $status"
-                      if [ "$status" == "healthy" ]; then
-                          echo "MySQL is ready!"
-                          exit 0
-                      fi
-                      echo "Waiting for MySQL... ($i/30)"
-                      sleep 2
-                  done
-                  docker logs todolist-mysql
-                  echo "MySQL did not become ready in time."
-                  exit 1
-            - name: Wait API reachable
-              run: |  
-                  for i in {1..30}; do
-                      if curl -fsS http://localhost:3000/api/tasks > /dev/null; then
-                          echo "API is reachable!"
-                          exit 0
-                      fi
-                      echo "Waiting for API... ($i/30)"
-                      sleep 2
-                  done
-                  docker logs todolist-api
-                  echo "API is not reachable."
-                  exit 1
-            - name: Smoke test (GET /api/tasks)
-              run: |  
-                  curl -fsS http://localhost:3000/api/tasks
-            - name: Stop MySQL container
-              if: always()
-              run: |
-                docker rm-f todolist-api todolist-mysql || true
+      - name: Wait for MySQL to be ready
+        run: |
+          echo "Waiting for MySQL to be ready..."
+
+          for i in {1..30}; do
+            if mysqladmin ping \
+              -h 127.0.0.1 \
+              -u root \
+              -proot \
+              --silent; then
+
+              echo "MySQL is ready!"
+              exit 0
+            fi
+
+            echo "Waiting for MySQL... ($i/30)"
+            sleep 2
+          done
+
+          echo "MySQL did not become ready in time."
+          exit 1
+
+      - name: Run tests
+        run: npm test
+
+
+  # ============================================================
+  # 2. BUILD DOCKER IMAGE
+  # ============================================================
+  build:
+    name: "Build Docker Image"
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t projet-fil-rouge:ci \
+            .
+
+      - name: Save Docker image
+        run: |
+          docker save projet-fil-rouge:ci \
+            -o projet-fil-rouge.tar
+
+      - name: Upload Docker image
+        uses: actions/upload-artifact@v4
+        with:
+          name: projet-fil-rouge-image
+          path: projet-fil-rouge.tar
+          retention-days: 1
+
+
+  # ============================================================
+  # 3. DEPLOY LOCAL + SMOKE TEST
+  # ============================================================
+  deploy_local:
+    name: "Local deploy (runner) + smoke test"
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: projet-fil-rouge-image
+
+      - name: Load Docker image
+        run: |
+          docker load \
+            -i projet-fil-rouge.tar
+
+      - name: Create Docker network
+        run: |
+          docker network create todolist-network
+
+      # ----------------------------------------------------------
+      # MySQL
+      # ----------------------------------------------------------
+      - name: Run MySQL container
+        run: |
+          docker run -d \
+            --name todolist-mysql \
+            --network todolist-network \
+            -e MYSQL_ROOT_PASSWORD=root \
+            -e MYSQL_DATABASE=todolist_db \
+            --health-cmd="mysqladmin ping -h 127.0.0.1 -u root -proot" \
+            --health-interval=5s \
+            --health-timeout=5s \
+            --health-retries=20 \
+            mysql:5.7
+
+      - name: Wait for MySQL health check
+        run: |
+          echo "Waiting for MySQL to be ready..."
+
+          for i in {1..30}; do
+            status=$(docker inspect \
+              --format='{{.State.Health.Status}}' \
+              todolist-mysql 2>/dev/null || echo "starting")
+
+            echo "MySQL health status: $status"
+
+            if [ "$status" = "healthy" ]; then
+              echo "MySQL is ready!"
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "MySQL did not become ready in time."
+          docker logs todolist-mysql
+          exit 1
+
+      # ----------------------------------------------------------
+      # API
+      # ----------------------------------------------------------
+      - name: Run API container
+        run: |
+          docker run -d \
+            --name todolist-api \
+            --network todolist-network \
+            -p 3000:3000 \
+            -e DB_HOST=todolist-mysql \
+            -e DB_USER=root \
+            -e DB_PASSWORD=root \
+            -e DB_NAME=todolist_db \
+            -e DB_DIALECT=mysql \
+            -e PORT=3000 \
+            -e NODE_ENV=test \
+            projet-fil-rouge:ci
+
+      - name: Show API logs
+        run: |
+          sleep 2
+          docker logs todolist-api
+
+      # ----------------------------------------------------------
+      # API health / availability
+      # ----------------------------------------------------------
+      - name: Wait for API to be reachable
+        run: |
+          echo "Waiting for API..."
+
+          for i in {1..30}; do
+
+            if curl -fsS \
+              http://localhost:3000/api/tasks \
+              > /dev/null; then
+
+              echo "API is reachable!"
+              exit 0
+            fi
+
+            echo "Waiting for API... ($i/30)"
+            sleep 2
+          done
+
+          echo "API is not reachable."
+
+          echo "===== API LOGS ====="
+          docker logs todolist-api
+
+          echo "===== MYSQL LOGS ====="
+          docker logs todolist-mysql
+
+          exit 1
+
+      # ----------------------------------------------------------
+      # Smoke test
+      # ----------------------------------------------------------
+      - name: Smoke test - GET /api/tasks
+        run: |
+          echo "Running smoke test..."
+
+          curl -fS \
+            http://localhost:3000/api/tasks
+
+          echo ""
+          echo "Smoke test passed!"
+
+      # ----------------------------------------------------------
+      # Cleanup
+      # ----------------------------------------------------------
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up containers..."
+
+          docker rm -f todolist-api || true
+          docker rm -f todolist-mysql || true
+          docker network rm todolist-network || true

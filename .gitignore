@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+.env
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Build artifacts
+*.pyc
+__pycache__/
+*.class
+target/
+
+# Docker
+.dockerignore
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Temporary files
+*.tmp
+*.bak
+
+# OS specific
+Thumbs.db
+.DS_Store
+
+# CI/CD
+.github/workflows/secrets
+
+# Terraform (si utilisé)
+*.tfstate
+*.tfstate.*
+.terraform/
